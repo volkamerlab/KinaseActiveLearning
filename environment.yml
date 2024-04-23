@@ -1,0 +1,19 @@
+name: kin_AL
+channels:
+  - conda-forge
+dependencies:
+  # Base dependencies
+  - python=3.11
+  - pip
+  - pandas 
+  - numpy 
+  - seaborn 
+  - tqdm 
+  - scikit-learn    
+  - chembl_webresource_client
+  - ijson
+  - ipywidgets>=7.5
+  - jupyterlab
+  - pip:
+    - useful_rdkit_utils 
+    - modAL-python>=0.4.1 
