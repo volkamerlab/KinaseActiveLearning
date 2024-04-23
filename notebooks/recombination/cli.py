@@ -140,7 +140,8 @@ def process(output_path, path_to_library, start_subpockets, max_depth):
             # ========================== INITIALIZATION ===============================
 
             fragment = Chem.RemoveHs(fragment)
-            frag_id = f"{subpocket}_{i}"
+            frag_ind = fragment.GetProp("Index")
+            frag_id = f"{subpocket}_{frag_ind}"
 
             # store unique atom identifiers
             for a, atom in enumerate(fragment.GetAtoms()):

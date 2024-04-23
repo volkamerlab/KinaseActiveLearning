@@ -114,7 +114,17 @@ def construct_ligand(fragment_ids, bond_ids, fragment_library):
     # Generate 2D coordinates
     AllChem.Compute2DCoords(ligand)
 
+    ligand.SetProp("frag_ids", ",".join(fragment_ids))
+    ligand.SetProp("bond_ids", bond_to_str(bond_ids))
     return ligand
+
+
+def bond_to_str(bonds):
+    bond_str = ""
+    for b in bonds:
+        bond_str += ",".join(b)
+        bond_str += "|"
+    return bond_str[:-1]
 
 
 def get_terminal_fragments(bond_id, subpockets):
@@ -142,7 +152,7 @@ def fragment_del(fragment_id, bond_id, fragment_library):
     return del_ligand, del_frag_id, del_bond_id
 
 
-def fragment_add(fragment_id, bond_id, fragment_library):
+def fragment_add(fragment_id, bond_id, fragment_library, subpockets):
     current_pockets = [s[:2] for s in fragment_id]
     add_pocket = []
     # get all possible additions
@@ -150,7 +160,9 @@ def fragment_add(fragment_id, bond_id, fragment_library):
         atom_subpockets = fragment_library[frag[:2]].atom_subpockets[int(frag[3:])]
         frag_pockets = list(set(atom_subpockets.split(" ")))
         add_pocket += [
-            (frag[:2], a, frag[3:]) for a in frag_pockets if a not in current_pockets
+            (frag[:2], a, frag[3:])
+            for a in frag_pockets
+            if a not in current_pockets and a in subpockets
         ]
 
     # select position to add fragments
@@ -164,9 +176,7 @@ def fragment_add(fragment_id, bond_id, fragment_library):
         set(fragment_library[frag_opt[1]].atom_subpockets[frag_index].split(" "))
     )
     if frag_opt[0] not in frag_pockets:
-        # TODO return fragment_add(fragment_id, bond_id, fragment_library)
-        print("hello")
-        return
+        return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
 
     # add new fragment_id
     fragment_id.append(frag_opt[1] + "_" + str(frag_index))
@@ -225,11 +235,17 @@ def fragment_exchange(fragment_id, bond_id, fragment_library):
     return ligand, del_frag_id, del_bond_id
 
 
-def fragment_modification(fragment_id, bond_id, fragment_library):
+def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
+    # TODO: catch recursion depth error (fragment_add)
     # if only one fragment present, add fragment instead
     if len(fragment_id) == 1:
-        return fragment_add(fragment_id, bond_id, fragment_library)
-
+        try:
+            ligand, frag_id, bonds = fragment_add(
+                fragment_id, bond_id, fragment_library, subpockets
+            )
+            return ligand, frag_id, bonds
+        except IndexError:
+            return None
     # else: choose randomly between three options: addition, deletion or substitution
     frag_opt = random.choice(range(3))
     # fragment deletion
@@ -239,7 +255,7 @@ def fragment_modification(fragment_id, bond_id, fragment_library):
     elif frag_opt == 1:
         try:
             ligand, frag_id, bonds = fragment_add(
-                fragment_id, bond_id, fragment_library
+                fragment_id, bond_id, fragment_library, subpockets
             )
         except IndexError:
             # no possibility to add, choose between delete and exchange instead
@@ -255,12 +271,4 @@ def fragment_modification(fragment_id, bond_id, fragment_library):
         return ligand, frag_id, bonds
     # fragment exchange
     elif frag_opt == 2:
-        fragment_exchange(fragment_id, bond_id, fragment_library)
-
-
-def sample_close_fragments(smi, vals, n_instances, fragment_library):
-    zipped = zip(smi, vals)
-    zipped = sorted(zipped, key=lambda x: x[1], reverse=True)
-    for s, _ in zipped[:n_instances]:
-        # TODO: get frag_ids and bond_ids
-        fragment_modification()
+        return fragment_exchange(fragment_id, bond_id, fragment_library)

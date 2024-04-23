@@ -17,7 +17,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def read_fragment_library(path_to_library, subpockets):
+def adapt_fragment_library(fragment_library):
     """
     Read fragment library
 
@@ -33,18 +33,12 @@ def read_fragment_library(path_to_library, subpockets):
 
     """
 
-    logger.info(f"Read fragment library...")
-    logger.info(f"Path: {path_to_library}")
-
     data = {}
-    for subpocket in subpockets:
-
-        file = path_to_library / (subpocket + ".sdf")
+    for subpocket in fragment_library.keys():
 
         # read molecules
         # keep hydrogen atoms
-        suppl = Chem.SDMolSupplier(str(file), removeHs=False)
-        mols = [f for f in suppl]
+        mols = fragment_library[subpocket].ROMol_original
 
         fragments = []
         for i, fragment in enumerate(mols):
@@ -62,9 +56,6 @@ def read_fragment_library(path_to_library, subpockets):
             fragments.append(fragment)
 
         data[subpocket] = fragments
-
-        n_frags = len(fragments)
-        logger.info(f"Number of fragments in {subpocket}: {n_frags}")
 
     return data
 
@@ -143,6 +134,7 @@ def recombine_ligand(meta, data):
         subpocket = frag_id[:2]
         idx = int(frag_id[3:])
         fragment = data[subpocket][idx]
+        fragment = Chem.RemoveHs(fragment)
         fragments.append(fragment)
 
     # combine fragments using map reduce model
@@ -299,6 +291,18 @@ def main():
 
     combinatory_library(
         HERE / ".." / "data" / "temp" / "recombined",
+        fragment_library,
+    )
+
+
+def process(fragment_library, com_path):
+    # subpockets = ["AP", "FP", "SE", "GA"]
+    # HERE = Path().parent.resolve()
+
+    fragment_library = adapt_fragment_library(fragment_library)
+
+    combinatory_library(
+        com_path,
         fragment_library,
     )
 

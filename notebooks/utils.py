@@ -510,3 +510,16 @@ def check_used(smi, used):
         if s in used:
             idx.append(i)
     return idx
+
+
+def extract_meta(mol):
+    frag_ids = mol.GetProp("frag_ids").split(",")
+    bond_ids = mol.GetProp("bond_ids").split("|")
+    bonds = []
+    for b in bond_ids:
+        bond = b.split(",")
+        # only one fragment present -> no bonds
+        if len(bond) == 1:
+            return frag_ids, []
+        bonds.append((bond[0], bond[1]))
+    return frag_ids, bonds
