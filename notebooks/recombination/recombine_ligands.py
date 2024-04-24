@@ -211,8 +211,6 @@ def ligand_recombination(meta, fragment_library):
     # construct ligand
     try:
         ligand = recombine_ligand(meta, fragment_library)
-        ligand.SetProp("frag_ids", ",".join(meta.frag_ids))
-        ligand.SetProp("bond_ids", bond_to_str(meta.bonds))
     except Exception as e:
         print(
             f"Error {e}: Molecule construction failed for molecule with fragment IDs {meta.frag_ids}"
@@ -227,7 +225,8 @@ def ligand_recombination(meta, fragment_library):
             f"Error {e}: Molecule standardization failed for molecule with fragment IDs {meta.frag_ids}"
         )
         return None
-
+    ligand.SetProp("frag_ids", ",".join(meta.frag_ids))
+    ligand.SetProp("bond_ids", bond_to_str(meta.bonds))
     return ligand
 
 
@@ -257,13 +256,6 @@ def combinatory_library(path_combinatorial_library, fragment_library):
                 ligand_recombination(meta, fragment_library)
                 for meta in pickle_loader(pickle_in)
             ]
-            # for meta in pickle_loader(pickle_in):
-            #    temp = ligand_recombination(meta, fragment_library)
-            # args_pool = [(meta, fragment_library) for meta in pickle_loader(pickle_in)]
-            # results_tmp = pool.starmap(
-            #    ligand_recombination,
-            #    args_pool,
-            # )
 
             logger.info(f"Number of ligands in current iteration: {len(results_tmp)}")
 
@@ -282,19 +274,6 @@ def combinatory_library(path_combinatorial_library, fragment_library):
                 f.write(m)
 
 
-def main():
-    subpockets = ["AP", "FP", "SE", "GA"]
-    HERE = Path().parent.resolve()
-    fragment_library = read_fragment_library(
-        HERE / ".." / "data" / "temp_library", subpockets
-    )
-
-    combinatory_library(
-        HERE / ".." / "data" / "temp" / "recombined",
-        fragment_library,
-    )
-
-
 def process(fragment_library, com_path):
     # subpockets = ["AP", "FP", "SE", "GA"]
     # HERE = Path().parent.resolve()
@@ -305,7 +284,3 @@ def process(fragment_library, com_path):
         com_path,
         fragment_library,
     )
-
-
-if __name__ == "__main__":
-    main()
