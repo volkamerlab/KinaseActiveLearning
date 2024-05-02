@@ -523,3 +523,9 @@ def extract_meta(mol):
             return frag_ids, []
         bonds.append((bond[0], bond[1]))
     return frag_ids, bonds
+
+
+def write_to_sdf(mols, path):
+    with Chem.SDWriter(path) as w:
+        for m in mols:
+            w.write(m)
