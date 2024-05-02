@@ -132,7 +132,7 @@ def get_terminal_fragments(bond_id, subpockets):
     for bond in bond_id:
         count[bond[0][:2]] += 1
         count[bond[1][:2]] += 1
-    return [k for k in count.keys() if count[k] == 1]
+    return [k for k in count.keys() if (count[k] == 1) and (count[k] != "AP")]
 
 
 def remove_bond(bond_id, subpocket):
