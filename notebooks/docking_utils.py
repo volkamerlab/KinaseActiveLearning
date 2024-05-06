@@ -32,6 +32,9 @@ def core_docking(
     ligand: Ligand
         Ligand object of molecule to dock
     """
+
+    if os.path.exists(path_output):
+        os.remove(path_output)
     # core docking
     output_text = subprocess.run(
         [
@@ -89,6 +92,9 @@ def hyde_scoring(
     ligand: Ligand
         Ligand object of molecule to score
     """
+
+    if os.path.exists(path_output):
+        os.remove(path_output)
     output_text = subprocess.run(
         [
             str(Path(".") / path_hyde),
