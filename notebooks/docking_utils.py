@@ -2,6 +2,7 @@ from pathlib import Path
 from rdkit import Chem
 import subprocess
 import os
+from rdkit.Chem import AllChem
 
 
 def core_docking(
@@ -142,3 +143,11 @@ def hyde_scoring(
             )
             opt_fragments.append(molecule_opt)
     return opt_fragments
+
+
+def compute_coordinates(mol):
+    mol = Chem.AddHs(mol)
+    AllChem.EmbedMolecule(mol)
+    # the molecule now has a crude conformation, clean it up:
+    AllChem.UFFOptimizeMolecule(mol)
+    return mol

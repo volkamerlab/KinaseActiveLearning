@@ -529,3 +529,7 @@ def write_to_sdf(mols, path):
     with Chem.SDWriter(path) as w:
         for m in mols:
             w.write(m)
+
+
+def indexing(arr, ind):
+    return [arr[i] for i in ind]
