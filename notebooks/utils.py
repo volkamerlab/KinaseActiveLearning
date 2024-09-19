@@ -533,3 +533,9 @@ def write_to_sdf(mols, path):
 
 def indexing(arr, ind):
     return [arr[i] for i in ind]
+
+
+def get_fragment_mol(frag_id, frag_lib):
+    pocket = frag_id.split("_")[0]
+    ind = int(frag_id.split("_")[1])
+    return frag_lib[pocket].ROMol[ind]

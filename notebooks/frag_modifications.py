@@ -127,11 +127,15 @@ def bond_to_str(bonds):
     return bond_str[:-1]
 
 
-def get_terminal_fragments(bond_id, subpockets):
+def get_terminal_fragments(bond_id, subpockets, allow_AP):
     count = {s: 0 for s in subpockets}
     for bond in bond_id:
         count[bond[0][:2]] += 1
         count[bond[1][:2]] += 1
+    # allow removing AP fragments
+    if allow_AP:
+        return [k for k in count.keys() if (count[k] == 1)]
+    # always keep AP fragments
     return [k for k in count.keys() if (count[k] == 1) and (count[k] != "AP")]
 
 
@@ -144,7 +148,7 @@ def remove_fragid(fragment_id, subpocket):
 
 
 def fragment_del(fragment_id, bond_id, fragment_library):
-    subpockets = get_terminal_fragments(bond_id, fragment_library.keys())
+    subpockets = get_terminal_fragments(bond_id, fragment_library.keys(), False)
     frag_del = random.choice(subpockets)
     del_frag_id = remove_fragid(fragment_id, frag_del)
     del_bond_id = remove_bond(bond_id, frag_del)
@@ -204,33 +208,42 @@ def get_dummy_id(fragment, subpocket):
 
 
 def fragment_exchange(fragment_id, bond_id, fragment_library):
-    subpockets = get_terminal_fragments(bond_id, fragment_library.keys())
+    subpockets = get_terminal_fragments(bond_id, fragment_library.keys(), True)
+    # always allow AP
+    if "AP" not in subpockets:
+        subpockets.append("AP")
     exch_pocket = random.choice(subpockets)
     # save current bond id and pocket (which is to be exchanged)
+    # save as list since we allow scaffold hopping of AP fragment
+    bond_id_1 = []
+    neigh_pocket = []
     for b in bond_id:
         if exch_pocket in b[0]:
-            bond_id_1 = b[1]
-            neigh_pocket = b[1][:2]
+            bond_id_1.append(b[1])
+            neigh_pocket.append(b[1][:2])
         elif exch_pocket in b[1]:
-            bond_id_1 = b[0]
-            neigh_pocket = b[0][:2]
+            bond_id_1.append(b[0])
+            neigh_pocket.append(b[0][:2])
 
     # remove fragment
     del_frag_id = remove_fragid(fragment_id, exch_pocket)
     del_bond_id = remove_bond(bond_id, exch_pocket)
 
-    # add fragment in same space
-    frag_index = fragment_library[exch_pocket].sample().index[0]
-    frag_pockets = list(
-        set(fragment_library[exch_pocket].atom_subpockets[frag_index].split(" "))
-    )
-    if neigh_pocket not in frag_pockets:
-        # select different fragment
-        return fragment_exchange(fragment_id, bond_id, fragment_library)
+    # select fragment to add in same space
+    while True:
+        frag_index = fragment_library[exch_pocket].sample().index[0]
+        frag_pockets = set(
+            fragment_library[exch_pocket].atom_subpockets[frag_index].split(" ")
+        )
+        # check fragment compatibility
+        if set(neigh_pocket).issubset(frag_pockets):
+            break
+        # return fragment_exchange(fragment_id, bond_id, fragment_library)
     del_frag_id.append(exch_pocket + "_" + str(frag_index))
     # get dummy atom to connect from new fragment
-    atom_id = get_dummy_id(fragment_library[exch_pocket].iloc[frag_index], neigh_pocket)
-    del_bond_id.append((bond_id_1, exch_pocket + "_" + str(atom_id)))
+    for bond, pocket in zip(bond_id_1, neigh_pocket):
+        atom_id = get_dummy_id(fragment_library[exch_pocket].iloc[frag_index], pocket)
+        del_bond_id.append((bond, exch_pocket + "_" + str(atom_id)))
     ligand = construct_ligand(del_frag_id, del_bond_id, fragment_library)
     return ligand, del_frag_id, del_bond_id
 

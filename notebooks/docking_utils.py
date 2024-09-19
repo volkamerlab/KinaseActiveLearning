@@ -6,6 +6,8 @@ from rdkit.Chem import AllChem
 import utils
 from rdkit.Chem import rdMolAlign
 import subprocess
+import numpy as np
+from scipy.stats import halfnorm
 
 
 def core_docking(
@@ -15,6 +17,8 @@ def core_docking(
     path_flexx: Path,
     ligand,
     print_output=False,
+    num_poses=10,
+    threads=10,
 ) -> list:
     """
     runs FlexX docking
@@ -35,6 +39,8 @@ def core_docking(
         Path to output file
     ligand: Ligand
         Ligand object of molecule to dock
+    num_poses: int
+        Number of poses to generate during docking, default=10
     """
 
     if os.path.exists(path_output):
@@ -49,6 +55,12 @@ def core_docking(
             str(path_config),
             "-o",
             str(path_output),
+            "--max-nof-con",
+            str(num_poses),
+            "--allowed-6ring-confs",
+            str(2),
+            "--thread-count",
+            str(threads),
         ],
         capture_output=True,
     )
@@ -61,8 +73,8 @@ def core_docking(
         str(path_output)
     ).st_size:  # only acces reult file if at least one pose was generated
         for molecule in Chem.SDMolSupplier(str(path_output)):
-            molecule.SetProp("frag_ids", str(ligand.GetProp("frag_ids")))
-            molecule.SetProp("bond_ids", str(ligand.GetProp("bond_ids")))
+            # molecule.SetProp("frag_ids", str(ligand.GetProp("frag_ids")))
+            # molecule.SetProp("bond_ids", str(ligand.GetProp("bond_ids")))
             docked_core_fragments.append(molecule)
 
     return docked_core_fragments
@@ -74,6 +86,7 @@ def hyde_scoring(
     path_output: Path,
     path_hyde: Path,
     ligand,
+    threads=10,
     print_output=False,
 ) -> list:
     """
@@ -108,6 +121,8 @@ def hyde_scoring(
             str(path_config),
             "-o",
             str(path_output),
+            "--thread-count",
+            str(threads),
         ],
         capture_output=True,
     )
@@ -136,9 +151,13 @@ def hyde_scoring(
             ]
             for prop in superfluos_props:
                 molecule_opt.ClearProp(prop)
-            # set proporties
-            molecule_opt.SetProp("frag_ids", str(ligand.GetProp("frag_ids")))
-            molecule_opt.SetProp("bond_ids", str(ligand.GetProp("bond_ids")))
+            try:
+                # set proporties
+                molecule_opt.SetProp("frag_ids", str(ligand.GetProp("frag_ids")))
+                molecule_opt.SetProp("bond_ids", str(ligand.GetProp("bond_ids")))
+            except:
+                # core fragment doesn't have frag_id and bond_id
+                pass
             # copy docking from docked molecule to optimzed molecule
             molecule_opt.SetProp(
                 "BIOSOLVEIT.DOCKING_SCORE",
@@ -164,6 +183,8 @@ def template_docking(
     path_flexx: Path,
     ligand,
     print_output=False,
+    num_poses=10,
+    threads=10,
 ) -> list:
     """
     runs FlexX template-docking
@@ -186,6 +207,8 @@ def template_docking(
         Path to output file
     ligand: Ligand
         Ligand of molecule to dock
+    num_poses: int
+        Number of poses to generate during docking, default=10
     """
     # template docking
     output_text = subprocess.run(
@@ -203,6 +226,12 @@ def template_docking(
             "1",
             # "--stereo-mode"
             # ,"3"
+            "--max-nof-con",
+            str(num_poses),
+            "--allowed-6ring-confs",
+            str(2),
+            "--thread-count",
+            str(threads),
         ],
         capture_output=True,  # needed to capture output text
     )
@@ -213,8 +242,8 @@ def template_docking(
     docked_fragments = []
     if os.stat(str(path_output)).st_size:
         for molecule in Chem.SDMolSupplier(str(path_output)):
-            molecule.SetProp("frag_ids", str(ligand.GetProp("frag_ids")))
-            molecule.SetProp("bond_ids", str(ligand.GetProp("bond_ids")))
+            # molecule.SetProp("frag_ids", str(ligand.GetProp("frag_ids")))
+            # molecule.SetProp("bond_ids", str(ligand.GetProp("bond_ids")))
             docked_fragments.append(molecule)
 
     return docked_fragments
@@ -244,6 +273,7 @@ def docking(
     fragment_library: list,
     ligand,
     print_output=False,
+    threads=10,
 ) -> list:
 
     path_template = path_output / "AP_fragment.sdf"
@@ -258,6 +288,7 @@ def docking(
         path_flexx,
         fragment,
         print_output,
+        threads,
     )
 
     hyde_docked = hyde_scoring(
@@ -267,6 +298,7 @@ def docking(
         path_hyde,
         fragment,
         print_output,
+        threads,
     )
 
     # chosen_poses = choose_template_poses(path_output / "core_hyde_output.sdf")
@@ -284,6 +316,7 @@ def docking(
             path_flexx,
             ligand,
             print_output,
+            threads,
         )
 
         hyde_template = hyde_scoring(
@@ -293,6 +326,7 @@ def docking(
             path_hyde,
             ligand,
             print_output,
+            threads,
         )
         docked.append(hyde_template[0])
 
@@ -355,12 +389,232 @@ def choose_template_poses(path_poses, num_templates=3):
 def calculate_rescoring(mols, path_input, path_output):
     utils.write_to_sdf(mols, path_input)
     subprocess.call(
-        f"./../docking_rescoring/rf-score-vs --receptor ../docking_rescoring/5n1f_prot.pdb {path_input} -O {path_output}",
+        f"./../docking_rescoring/rf-score-vs --receptor ../docking_rescoring/5n1f_seesar.pdb {path_input} -O {path_output}",
         shell=True,
     )
     mols = utils.read_sdf(path_output)
     affinity = [float(m.GetProp("RFScoreVS_v2")) for m in mols]
     return mols, affinity
+
+
+def extract_pocket(mol, pocket):
+    frag_ids = mol.GetProp("frag_ids").split(",")
+    for frag in frag_ids:
+        if pocket in frag:
+            return frag
+    print(mol.GetProp("frag_ids"))
+    return None
+    # frag_ids = [(p.split("_")[0], p.split("_")[1]) for p in frag_ids]
+    # pockets, ind = frag_ids.unzip()
+    # try:
+    #    p_ind = pockets.index(pocket)
+    #    return
+    # except ValueError:
+    #    print(f"Pocket not covered in mol: {pocket}, {mol.GetProp("frag_ids")}")
+    #    return None
+
+
+# def remove_dummies(mol):
+# replace dummy atoms with hydrogens
+# du = Chem.MolFromSmiles("*")
+# h = Chem.MolFromSmiles("[H]", sanitize=False)
+# ligand = AllChem.ReplaceSubstructs(mol, du, h, replaceAll=True)[0]
+# try:
+#    ligand = Chem.RemoveHs(ligand)
+#    return ligand
+# except ValueError as ve:
+#    print(ve)
+#    return
+
+
+def rename_ligands(lig_file):
+    mols = [mol for mol in Chem.SDMolSupplier(lig_file)]
+    for mol in mols:
+        mol.SetProp("_Name", mol.GetProp("frag_ids"))
+    utils.write_to_sdf(mols, lig_file)
+
+
+def create_template_docking_files(mols, core_frags, out_file, frag_lib):
+    mols = np.array(mols)
+    core_uniqes = list(set(core_frags))
+    core_mols = [utils.get_fragment_mol(core, frag_lib) for core in core_uniqes]
+    core_frags = np.array(core_frags)
+    ligand_file_names = []
+    template_file_names = []
+    # iterate over all possible core fragments
+    for i, core in enumerate(core_uniqes):
+        ind = np.where(core_frags == core)[0]
+        ligands = mols[ind]
+        core_file = str(out_file) + "_" + core + ".sdf"
+        ligand_file_names.append(core_file)
+        # write all molecules with same core fragment into one file
+        utils.write_to_sdf(ligands, core_file)
+        template_file = str(out_file) + "_template_" + core + ".sdf"
+        template_file_names.append(template_file)
+        # write matching core fragment (without dummy atoms) into single file
+        core_coords = compute_coordinates(core_mols[i])
+        utils.write_to_sdf([core_coords], template_file)
+    return ligand_file_names, template_file_names
+
+
+def full_docking(
+    ligand_files,
+    template_files,
+    output_path,
+    docking_config,
+    path_flexx,
+    path_hyde,
+    threads=10,
+):
+    concat_docked = []
+    for lig_file, templ_file in zip(ligand_files, template_files):
+        # AP fragment docking
+        core_frag = [mol for mol in Chem.SDMolSupplier(templ_file, removeHs=False)]
+        docking = core_docking(
+            templ_file,
+            docking_config / "AP.flexx",
+            output_path / "mol_core_docked.sdf",
+            path_flexx,
+            core_frag[0],
+            True,
+            10,
+            threads,
+        )
+        if len(docking) == 0:
+            continue
+        hyde_docked = hyde_scoring(
+            output_path / "mol_core_docked.sdf",
+            docking_config / "AP.hydescorer",
+            output_path / "mol_core_hyde.sdf",
+            path_hyde,
+            core_frag[0],
+            True,
+            threads,
+        )
+        if len(hyde_docked) == 0:
+            continue
+        # template docking
+        core_poses = [
+            mol for mol in Chem.SDMolSupplier(str(output_path / "mol_core_hyde.sdf"))
+        ]
+        core_poses = [
+            mol
+            for mol in Chem.SDMolSupplier(
+                str(output_path / "mol_core_docked.sdf"), removeHs=False
+            )
+        ]
+        rename_ligands(lig_file)
+        mols = [mol for mol in Chem.SDMolSupplier(lig_file, removeHs=False)]
+        for i, core_pose in enumerate(core_poses):
+            file_name = "mol_core_hyde_pose_" + str(i) + ".sdf"
+            templ_file_name = "mol_template_docking_pose_" + str(i) + ".sdf"
+            final_file_name = "mol_template_hyde_pose_" + str(i) + ".sdf"
+            utils.write_to_sdf([core_pose], output_path / file_name)
+            template_docked = template_docking(
+                lig_file,
+                output_path / file_name,
+                docking_config / "AP_FP_GA_SE_clashes.flexx",
+                output_path / templ_file_name,
+                path_flexx,
+                mols,
+                True,
+            )
+            print(f"Number of dockings after template docking: {len(template_docked)}")
+            if len(template_docked) == 0:
+                continue
+            template_hyde = hyde_scoring(
+                output_path / templ_file_name,
+                docking_config / "AP_FP_GA_SE_clashes.hydescorer",
+                output_path / final_file_name,
+                path_hyde,
+                mols,
+                True,
+                threads,
+            )
+            # rint(f"Number of dockings after hyde optimization: {len(template_hyde)}")
+            concat_docked += template_hyde
+            # concat_docked += template_docked
+    return concat_docked
+
+
+def filter_poses(mols, docked_mols):
+    smi_docked = [Chem.MolToSmiles(m) for m in mols]
+    print(smi_docked)
+    final_docked = [None for i in range(len(mols))]
+    for mol in docked_mols:
+        if mol is None:
+            continue
+        smi = Chem.MolToSmiles(mol)
+        try:
+            # TODO: save best pose?
+            ind = smi_docked.index(smi)
+        except Exception as e:
+            print(e)
+            continue
+        final_docked[ind] = mol
+    return final_docked
+
+
+def filter_poses_id(mols, docked_mols):
+    frag_ids = [m.GetProp("frag_ids") for m in mols]
+    final_docked = [None for i in range(len(mols))]
+    for mol in docked_mols:
+        if mol is None:
+            continue
+        frags = "_".join(mol.GetProp("_Name").split("_")[:-1])
+        try:
+            ind = frag_ids.index(frags)
+        except Exception as e:
+            print(e)
+            continue
+        if final_docked[ind] is None:
+            final_docked[ind] = mol
+        # save best docking pose only
+        # if float(final_docked[ind].GetProp("BIOSOLVEIT.DOCKING_SCORE")) > float(
+        #    mol.GetProp("BIOSOLVEIT.DOCKING_SCORE")
+        # ):
+        if float(
+            final_docked[ind].GetProp(
+                "BIOSOLVEIT.HYDE_ESTIMATED_AFFINITY_LOWER_BOUNDARY [nM]"
+            )
+        ) > float(
+            mol.GetProp("BIOSOLVEIT.HYDE_ESTIMATED_AFFINITY_LOWER_BOUNDARY [nM]")
+        ):
+            final_docked[ind] = mol
+    return final_docked
+
+
+def set_default_affinity(affinities, docked_mols, default=5.5):
+    indexes = [ind for ind, mol in enumerate(docked_mols) if mol is not None]
+    output_aff = [default for _ in docked_mols]
+    for ind, aff in zip(indexes, affinities):
+        output_aff[ind] = aff
+    return output_aff
+
+
+def sample_decoy_value(affinities, docked_mols, mean=6.1, scale=0.2, cutoff=5.96):
+    # sample decoy values from halfnorm distribution
+    size = len(np.where(np.array(affinities) > 6.1)[0])
+    samples = halfnorm.rvs(loc=0, scale=scale, size=size)
+    samples = mean - samples
+    samples = samples[np.where(samples <= cutoff)]
+
+    # set docking affinities in array
+    indexes = [ind for ind, mol in enumerate(docked_mols) if mol is not None]
+    output_aff = [None for _ in docked_mols]
+    for ind, aff in zip(indexes, affinities):
+        output_aff[ind] = aff
+
+    # fill docking fails with decoy values
+    ind_samples = 0
+    for ind, aff in enumerate(output_aff):
+        if len(samples) == ind_samples:
+            # some values might still be none!
+            return output_aff
+        if aff is None:
+            output_aff[ind] = samples[ind_samples]
+            ind_samples += 1
+    return output_aff
 
 
 # path_output = Path(
