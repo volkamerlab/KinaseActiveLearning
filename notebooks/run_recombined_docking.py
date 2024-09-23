@@ -5,6 +5,7 @@ from os.path import isfile, join
 from rdkit import Chem
 
 import docking_utils
+import utils
 
 HERE = pathlib.Path().resolve()
 PATH_HYDE = Path("/Applications/Hydescorer.app/Contents/MacOS/Hydescorer")
@@ -52,3 +53,10 @@ final_docked = docking_utils.filter_poses_id(mols_docking, concat_docked)
 print(
     f"Successful dockings: {len([f for f in final_docked if f is not None])} / {len(mols_docking)}"
 )
+
+utils.write_to_sdf(final_docked, str(com_path / "final_recombined_library.sdf"))
+
+# write into single files
+for mol in Chem.SDMolSupplier(str(com_path / "final_recombined_library.sdf")):
+    mol_name = mol.GetProp("_Name")
+    utils.write_to_sdf([mol], str(com_path / "kinodata-3d" / mol_name) + ".sdf")
