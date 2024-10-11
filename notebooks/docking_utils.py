@@ -86,8 +86,8 @@ def hyde_scoring(
     path_output: Path,
     path_hyde: Path,
     ligand,
-    threads=10,
     print_output=False,
+    threads=10,
 ) -> list:
     """
     runs hydescoring
@@ -464,6 +464,7 @@ def full_docking(
     docking_config,
     path_flexx,
     path_hyde,
+    allow_skip_hyde=False,
     threads=10,
 ):
     concat_docked = []
@@ -492,7 +493,10 @@ def full_docking(
             threads,
         )
         if len(hyde_docked) == 0:
-            continue
+            if not allow_skip_hyde:
+                continue
+            else:
+                hyde_docked = docking
         # template docking
         core_poses = [
             mol for mol in Chem.SDMolSupplier(str(output_path / "mol_core_hyde.sdf"))
@@ -509,7 +513,7 @@ def full_docking(
             file_name = "mol_core_hyde_pose_" + str(i) + ".sdf"
             templ_file_name = "mol_template_docking_pose_" + str(i) + ".sdf"
             final_file_name = "mol_template_hyde_pose_" + str(i) + ".sdf"
-            utils.write_to_sdf([core_pose], output_path / file_name)
+            utils.write_to_sdf([core_pose], str(output_path / file_name))
             template_docked = template_docking(
                 lig_file,
                 output_path / file_name,
@@ -518,6 +522,8 @@ def full_docking(
                 path_flexx,
                 mols,
                 True,
+                10,
+                threads,
             )
             print(f"Number of dockings after template docking: {len(template_docked)}")
             if len(template_docked) == 0:
@@ -532,6 +538,8 @@ def full_docking(
                 threads,
             )
             # rint(f"Number of dockings after hyde optimization: {len(template_hyde)}")
+            if (len(template_hyde) == 0) and allow_skip_hyde:
+                template_hyde = template_docked
             concat_docked += template_hyde
             # concat_docked += template_docked
     return concat_docked

@@ -8,14 +8,24 @@ import docking_utils
 import utils
 
 HERE = pathlib.Path().resolve()
-PATH_HYDE = Path("/Applications/Hydescorer.app/Contents/MacOS/Hydescorer")
-PATH_FLEXX = Path("/Applications/FlexX.app/Contents/MacOS/FlexX")
-DOCKING_CONFIG = HERE / "data" / "docking_config" / "5n1f"
-com_path = Path(HERE / "data" / "recombination_library")
+# PATH_HYDE = Path("/Applications/Hydescorer.app/Contents/MacOS/Hydescorer")
+# PATH_FLEXX = Path("/Applications/FlexX.app/Contents/MacOS/FlexX")
+PATH_HYDE = Path(
+    "/home/paula.kramer/KinaseActiveLearning//hydescorer-2.1.0-Linux-x64/hydescorer"
+)
+PATH_FLEXX = Path("/home/paula.kramer/KinaseActiveLearning/flexx-6.1.0-Linux-x64/flexx")
+DOCKING_CONFIG = HERE / ".." / "data" / "docking_config" / "5n1f"
+com_path = Path(HERE / ".." / "data" / "recombination_library")
+# DOCKING_CONFIG = HERE / "data" / "docking_config" / "5n1f"
+# com_path = Path(HERE / "data" / "recombination_library")
 docking_input = com_path / "temp"
 
 
-all_files = [f for f in listdir(docking_input) if isfile(join(docking_input, f))]
+all_files = [
+    join(docking_input, f)
+    for f in listdir(docking_input)
+    if isfile(join(docking_input, f))
+]
 
 ligand_files = []
 template_files = []
@@ -45,7 +55,8 @@ concat_docked = docking_utils.full_docking(
     DOCKING_CONFIG,
     PATH_FLEXX,
     PATH_HYDE,
-    10,
+    True,
+    100,
 )
 
 print(f"done docking, concat_docking len: {len(concat_docked)}")
@@ -54,7 +65,10 @@ print(
     f"Successful dockings: {len([f for f in final_docked if f is not None])} / {len(mols_docking)}"
 )
 
-utils.write_to_sdf(final_docked, str(com_path / "final_recombined_library.sdf"))
+utils.write_to_sdf(
+    [f for f in final_docked if f is not None],
+    str(com_path / "final_recombined_library.sdf"),
+)
 
 # write into single files
 for mol in Chem.SDMolSupplier(str(com_path / "final_recombined_library.sdf")):
