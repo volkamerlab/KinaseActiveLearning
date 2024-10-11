@@ -578,17 +578,21 @@ def filter_poses_id(mols, docked_mols):
         if final_docked[ind] is None:
             final_docked[ind] = mol
         # save best docking pose only
-        # if float(final_docked[ind].GetProp("BIOSOLVEIT.DOCKING_SCORE")) > float(
-        #    mol.GetProp("BIOSOLVEIT.DOCKING_SCORE")
-        # ):
-        if float(
-            final_docked[ind].GetProp(
-                "BIOSOLVEIT.HYDE_ESTIMATED_AFFINITY_LOWER_BOUNDARY [nM]"
-            )
-        ) > float(
-            mol.GetProp("BIOSOLVEIT.HYDE_ESTIMATED_AFFINITY_LOWER_BOUNDARY [nM]")
-        ):
-            final_docked[ind] = mol
+        try:
+            if float(
+                final_docked[ind].GetProp(
+                    "BIOSOLVEIT.HYDE_ESTIMATED_AFFINITY_LOWER_BOUNDARY [nM]"
+                )
+            ) > float(
+                mol.GetProp("BIOSOLVEIT.HYDE_ESTIMATED_AFFINITY_LOWER_BOUNDARY [nM]")
+            ):
+                final_docked[ind] = mol
+        # no hyde optimization performed, take docking score instead
+        except KeyError:
+            if float(final_docked[ind].GetProp("BIOSOLVEIT.DOCKING_SCORE")) > float(
+                mol.GetProp("BIOSOLVEIT.DOCKING_SCORE")
+            ):
+                final_docked[ind] = mol
     return final_docked
 
 
