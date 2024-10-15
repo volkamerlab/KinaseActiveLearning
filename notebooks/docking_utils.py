@@ -498,15 +498,25 @@ def full_docking(
             else:
                 hyde_docked = docking
         # template docking
-        core_poses = [
-            mol for mol in Chem.SDMolSupplier(str(output_path / "mol_core_hyde.sdf"))
-        ]
-        core_poses = [
+        if os.path.isfile(str(output_path / "mol_core_hyde.sdf")):
+            core_poses_hyde = [
+                mol
+                for mol in Chem.SDMolSupplier(
+                    str(output_path / "mol_core_hyde.sdf"), removeHs=False
+                )
+            ]
+        else:
+            core_poses_hyde = []
+        core_poses_docked = [
             mol
             for mol in Chem.SDMolSupplier(
                 str(output_path / "mol_core_docked.sdf"), removeHs=False
             )
         ]
+
+        # keep both hyde and docking poses as templates
+        core_poses = core_poses_docked + core_poses_hyde
+
         rename_ligands(lig_file)
         mols = [mol for mol in Chem.SDMolSupplier(lig_file, removeHs=False)]
         for i, core_pose in enumerate(core_poses):
