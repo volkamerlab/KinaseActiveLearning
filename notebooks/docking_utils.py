@@ -498,7 +498,7 @@ def full_docking(
             else:
                 hyde_docked = docking
         # template docking
-        if os.path.isfile(str(output_path / "mol_core_hyde.sdf")):
+        if os.stat(str(output_path / "mol_core_hyde.sdf")).st_size > 0:
             core_poses_hyde = [
                 mol
                 for mol in Chem.SDMolSupplier(
