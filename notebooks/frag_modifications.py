@@ -1,10 +1,13 @@
 import random
 from functools import reduce
+import sys
 
 
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.PropertyMol import PropertyMol
+
+import brics_rules
 
 
 def construct_ligand(fragment_ids, bond_ids, fragment_library):
@@ -182,13 +185,18 @@ def fragment_add(fragment_id, bond_id, fragment_library, subpockets):
     if frag_opt[0] not in frag_pockets:
         return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
 
+    # get new dummy atoms to connect
+    frag = fragment_library[frag_opt[0]].iloc[int(frag_opt[2])]
+    frag1 = fragment_library[frag_opt[1]].iloc[frag_index]
+    atom_id = get_dummy_id(frag, frag_opt[1])
+    atom_id1 = get_dummy_id(frag1, frag_opt[0])
+
+    # check brics compatibility
+    if not brics_compatibility(frag1, atom_id, frag1, atom_id1):
+        return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
+
     # add new fragment_id
     fragment_id.append(frag_opt[1] + "_" + str(frag_index))
-    # get new dummy atoms to connect
-    atom_id = get_dummy_id(
-        fragment_library[frag_opt[0]].iloc[int(frag_opt[2])], frag_opt[1]
-    )
-    atom_id1 = get_dummy_id(fragment_library[frag_opt[1]].iloc[frag_index], frag_opt[0])
     # add new bond_id
     bond_id.append(
         (frag_opt[0] + "_" + str(atom_id), frag_opt[1] + "_" + str(atom_id1))
@@ -205,6 +213,24 @@ def get_dummy_id(fragment, subpocket):
             assert a.GetAtomicNum() == 0
             return i
     return None
+
+
+def get_atom_env(fragment, atom_ind):
+    fragment = Chem.RemoveHs(fragment.ROMol_original)
+    for i, a in enumerate(fragment.GetAtoms()):
+        if i == atom_ind:
+            return a.GetProp("environment")
+    return None
+
+
+def brics_compatibility(frag1, atom_id1, frag2, atom_id2):
+    atom1_dummy = Chem.RemoveHs(frag1.ROMol_original).GetAtomWithIdx(atom_id1)
+    atom2_dummy = Chem.RemoveHs(frag2.ROMol_original).GetAtomWithIdx(atom_id2)
+    frag1_atom_id = atom1_dummy.GetNeighbors()[0].GetIdx()
+    frag2_atom_id = atom2_dummy.GetNeighbors()[0].GetIdx()
+    atom_env1 = get_atom_env(frag1, frag1_atom_id)
+    atom_env2 = get_atom_env(frag2, frag2_atom_id)
+    return brics_rules.is_brics_bond(atom_env1, atom_env2)
 
 
 def fragment_exchange(fragment_id, bond_id, fragment_library):
@@ -243,21 +269,28 @@ def fragment_exchange(fragment_id, bond_id, fragment_library):
     # get dummy atom to connect from new fragment
     for bond, pocket in zip(bond_id_1, neigh_pocket):
         atom_id = get_dummy_id(fragment_library[exch_pocket].iloc[frag_index], pocket)
+        frag_index1 = int(bond.split("_")[1])
+        atom_id1 = get_dummy_id(fragment_library[pocket].iloc[frag_index1], exch_pocket)
+        # check for brics compatibility
+        if not brics_compatibility(
+            fragment_library[exch_pocket.iloc[frag_index]],
+            atom_id,
+            fragment_library[pocket].iloc[frag_index1],
+            atom_id1,
+        ):
+            fragment_exchange(fragment_id, bond_id, fragment_library)
         del_bond_id.append((bond, exch_pocket + "_" + str(atom_id)))
     ligand = construct_ligand(del_frag_id, del_bond_id, fragment_library)
     return ligand, del_frag_id, del_bond_id
 
 
 def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
-    # TODO: catch recursion depth error (fragment_add)
+    sys.setrecursionlimit(100)
     # if only one fragment present, add fragment instead
     if len(fragment_id) == 1:
         try:
-            ligand, frag_id, bonds = fragment_add(
-                fragment_id, bond_id, fragment_library, subpockets
-            )
-            return ligand, frag_id, bonds
-        except IndexError:
+            return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
+        except (IndexError, RecursionError):
             return None
     # else: choose randomly between three options: addition, deletion or substitution
     frag_opt = random.choice(range(3))
@@ -267,21 +300,29 @@ def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
     # fragment addition
     elif frag_opt == 1:
         try:
-            ligand, frag_id, bonds = fragment_add(
-                fragment_id, bond_id, fragment_library, subpockets
-            )
-        except IndexError:
+            return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
+        except (IndexError, RecursionError):
             # no possibility to add, choose between delete and exchange instead
             new_opt = random.choice(range(2))
             if new_opt == 0:
-                ligand, frag_id, bonds = fragment_del(
-                    fragment_id, bond_id, fragment_library
-                )
+                return fragment_del(fragment_id, bond_id, fragment_library)
             elif new_opt == 1:
-                ligand, frag_id, bonds = fragment_exchange(
-                    fragment_id, bond_id, fragment_library
-                )
-        return ligand, frag_id, bonds
+                try:
+                    return fragment_exchange(fragment_id, bond_id, fragment_library)
+                except (IndexError, RecursionError):
+                    # can't find fragment to exchange, delete fragment instead
+                    return fragment_del(fragment_id, bond_id, fragment_library)
     # fragment exchange
     elif frag_opt == 2:
-        return fragment_exchange(fragment_id, bond_id, fragment_library)
+        try:
+            return fragment_exchange(fragment_id, bond_id, fragment_library)
+        except (IndexError, RecursionError):
+            new_opt = random.choice(range(2))
+            if new_opt == 0:
+                return fragment_del(fragment_id, bond_id, fragment_library)
+            elif new_opt == 1:
+                try:
+                    return fragment_add(fragment_id, bond_id, fragment_library)
+                except (IndexError, RecursionError):
+                    # can't find fragment to exchange, delete fragment instead
+                    return fragment_del(fragment_id, bond_id, fragment_library)
