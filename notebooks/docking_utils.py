@@ -8,6 +8,7 @@ from rdkit.Chem import rdMolAlign
 import subprocess
 import numpy as np
 from scipy.stats import halfnorm
+import pandas as pd
 
 
 def core_docking(
@@ -257,7 +258,7 @@ def extract_fragment(mol, subpocket, fragment_library, path_fragment):
             frag_id = frag
             break
 
-    fragment = fragment_library[subpocket].iloc[ind].ROMol
+    fragment = fragment_library[subpocket].loc[ind].ROMol
     fragment.SetProp("frag_ids", frag_id)
     fragment = compute_coordinates(fragment)
     utils.write_to_sdf([fragment], path_fragment)
@@ -671,3 +672,25 @@ def sample_decoy_value(affinities, docked_mols, mean=6.1, scale=0.2, cutoff=5.96
 #    mol,
 #    True,
 # )
+
+
+def read_affinities(file):
+    df = pd.read_csv(
+        file,
+        names=["Ligand", "Model1", "Model2", "Model3", "Model4", "Model5"],
+        header=None,
+    )
+    df["mean"] = df.mean(axis=1, numeric_only=True)
+    df["std"] = df.iloc[:, [1, 2, 3, 4, 5]].std(axis=1, numeric_only=True)
+
+    affinities = {}
+    for _, row in df.iterrows():
+        # revert to old naming convention
+        name = row["Ligand"].split("_")[:-1]
+        name = "_".join(name)
+        # sort fragments for fixed order
+        name = sorted(name.split("-"))
+        name = ",".join(name)
+
+        affinities[name] = (row["mean"], row["std"])
+    return affinities

@@ -8,6 +8,7 @@ from rdkit.Chem import AllChem
 from rdkit.Chem.PropertyMol import PropertyMol
 
 import brics_rules
+import utils
 
 
 def construct_ligand(fragment_ids, bond_ids, fragment_library):
@@ -174,6 +175,8 @@ def fragment_add(fragment_id, bond_id, fragment_library, subpockets):
 
     # select position to add fragments
     # frag_opt: (subpocket of present fragment, new subpocket present fragment could connect to, present fragment id)
+    if len(add_pocket) == 0:
+        raise IndexError("Cannot add another fragment")
     frag_opt = random.choice(add_pocket)
 
     # sample fragment to add
@@ -186,13 +189,13 @@ def fragment_add(fragment_id, bond_id, fragment_library, subpockets):
         return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
 
     # get new dummy atoms to connect
-    frag = fragment_library[frag_opt[0]].iloc[int(frag_opt[2])]
-    frag1 = fragment_library[frag_opt[1]].iloc[frag_index]
+    frag = fragment_library[frag_opt[0]].loc[int(frag_opt[2])]
+    frag1 = fragment_library[frag_opt[1]].loc[frag_index]
     atom_id = get_dummy_id(frag, frag_opt[1])
     atom_id1 = get_dummy_id(frag1, frag_opt[0])
 
     # check brics compatibility
-    if not brics_compatibility(frag1, atom_id, frag1, atom_id1):
+    if not brics_compatibility(frag, atom_id, frag1, atom_id1):
         return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
 
     # add new fragment_id
@@ -268,14 +271,16 @@ def fragment_exchange(fragment_id, bond_id, fragment_library):
     del_frag_id.append(exch_pocket + "_" + str(frag_index))
     # get dummy atom to connect from new fragment
     for bond, pocket in zip(bond_id_1, neigh_pocket):
-        atom_id = get_dummy_id(fragment_library[exch_pocket].iloc[frag_index], pocket)
-        frag_index1 = int(bond.split("_")[1])
-        atom_id1 = get_dummy_id(fragment_library[pocket].iloc[frag_index1], exch_pocket)
+        atom_id = get_dummy_id(fragment_library[exch_pocket].loc[frag_index], pocket)
+        frag_index1 = utils.extract_frag_id(
+            fragment_id, pocket
+        )  # int(bond.split("_")[1])
+        atom_id1 = get_dummy_id(fragment_library[pocket].loc[frag_index1], exch_pocket)
         # check for brics compatibility
         if not brics_compatibility(
-            fragment_library[exch_pocket.iloc[frag_index]],
+            fragment_library[exch_pocket].loc[frag_index],
             atom_id,
-            fragment_library[pocket].iloc[frag_index1],
+            fragment_library[pocket].loc[frag_index1],
             atom_id1,
         ):
             fragment_exchange(fragment_id, bond_id, fragment_library)
@@ -290,7 +295,9 @@ def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
     if len(fragment_id) == 1:
         try:
             return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
-        except (IndexError, RecursionError):
+        except (IndexError, RecursionError) as e:
+            print("294")
+            print(e)
             return None
     # else: choose randomly between three options: addition, deletion or substitution
     frag_opt = random.choice(range(3))
@@ -301,7 +308,9 @@ def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
     elif frag_opt == 1:
         try:
             return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
-        except (IndexError, RecursionError):
+        except (IndexError, RecursionError) as e:
+            # print("307")
+            # print(e)
             # no possibility to add, choose between delete and exchange instead
             new_opt = random.choice(range(2))
             if new_opt == 0:
@@ -309,20 +318,26 @@ def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
             elif new_opt == 1:
                 try:
                     return fragment_exchange(fragment_id, bond_id, fragment_library)
-                except (IndexError, RecursionError):
+                except (IndexError, RecursionError) as e:
+                    print("317")
+                    print(e)
                     # can't find fragment to exchange, delete fragment instead
                     return fragment_del(fragment_id, bond_id, fragment_library)
     # fragment exchange
     elif frag_opt == 2:
         try:
             return fragment_exchange(fragment_id, bond_id, fragment_library)
-        except (IndexError, RecursionError):
+        except (IndexError, RecursionError) as e:
+            print("326")
+            print(e)
             new_opt = random.choice(range(2))
             if new_opt == 0:
                 return fragment_del(fragment_id, bond_id, fragment_library)
             elif new_opt == 1:
                 try:
                     return fragment_add(fragment_id, bond_id, fragment_library)
-                except (IndexError, RecursionError):
+                except (IndexError, RecursionError) as e:
+                    # print("335")
+                    # print(e)
                     # can't find fragment to exchange, delete fragment instead
                     return fragment_del(fragment_id, bond_id, fragment_library)

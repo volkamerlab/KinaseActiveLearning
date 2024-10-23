@@ -539,3 +539,32 @@ def get_fragment_mol(frag_id, frag_lib):
     pocket = frag_id.split("_")[0]
     ind = int(frag_id.split("_")[1])
     return frag_lib[pocket].ROMol[ind]
+
+
+def sort_ligand_name(lig_name):
+    lig_name = sorted(lig_name.split(","))
+    lig_name = ",".join(lig_name)
+    return lig_name
+
+
+def get_subset_library(fragment_library, subset_library, subpockets):
+    final_library = {}
+    for pocket in subpockets:
+        new_fragment_library = pd.DataFrame()
+        for _, row in subset_library[pocket].iterrows():
+            new_fragment_library = pd.concat(
+                [
+                    new_fragment_library,
+                    fragment_library[pocket].loc[
+                        fragment_library[pocket].complex_pdb == row["complex_pdb"]
+                    ],
+                ]
+            )
+        final_library[pocket] = new_fragment_library
+    return final_library
+
+
+def extract_frag_id(frags, pocket):
+    for fr in frags:
+        if pocket in fr:
+            return int(fr[3:])
