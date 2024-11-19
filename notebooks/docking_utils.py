@@ -429,7 +429,7 @@ def extract_pocket(mol, pocket):
 
 
 def rename_ligands(lig_file):
-    mols = [mol for mol in Chem.SDMolSupplier(lig_file)]
+    mols = [mol for mol in Chem.SDMolSupplier(lig_file) if mol is not None]
     for mol in mols:
         mol.SetProp("_Name", mol.GetProp("frag_ids"))
     utils.write_to_sdf(mols, lig_file)
@@ -638,6 +638,15 @@ def sample_decoy_value(affinities, docked_mols, mean=6.1, scale=0.2, cutoff=5.96
             output_aff[ind] = samples[ind_samples]
             ind_samples += 1
     return output_aff
+
+
+def extract_docking_failures(query_mols, vals):
+    docking_failures = [query_mols[ind] for ind, val in enumerate(vals) if val == None]
+    frag_ids = [
+        utils.sort_ligand_name(docked.GetProp("frag_ids"))
+        for docked in docking_failures
+    ]
+    return frag_ids
 
 
 # path_output = Path(
