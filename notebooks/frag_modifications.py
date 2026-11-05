@@ -6,6 +6,16 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.PropertyMol import PropertyMol
 
+import brics_rules
+import utils
+
+# How many times a modification redraws a fragment before giving up. This replaces the
+# old mechanism, which recursed until `sys.setrecursionlimit(100)` raised RecursionError:
+# the budget was then whatever was left of the stack, about 97 frames in a script but
+# only about 71 inside a Jupyter kernel, so the same seed gave different molecules
+# depending on how the code was started.
+MAX_MODIFICATION_ATTEMPTS = 100
+
 
 def construct_ligand(fragment_ids, bond_ids, fragment_library):
     """
@@ -127,12 +137,16 @@ def bond_to_str(bonds):
     return bond_str[:-1]
 
 
-def get_terminal_fragments(bond_id, subpockets):
+def get_terminal_fragments(bond_id, subpockets, allow_AP):
     count = {s: 0 for s in subpockets}
     for bond in bond_id:
         count[bond[0][:2]] += 1
         count[bond[1][:2]] += 1
-    return [k for k in count.keys() if (count[k] == 1) and (count[k] != "AP")]
+    # allow removing AP fragments
+    if allow_AP:
+        return [k for k in count.keys() if (count[k] == 1)]
+    # always keep AP fragments
+    return [k for k in count.keys() if (count[k] == 1) and (k != "AP")]
 
 
 def remove_bond(bond_id, subpocket):
@@ -144,7 +158,7 @@ def remove_fragid(fragment_id, subpocket):
 
 
 def fragment_del(fragment_id, bond_id, fragment_library):
-    subpockets = get_terminal_fragments(bond_id, fragment_library.keys())
+    subpockets = get_terminal_fragments(bond_id, fragment_library.keys(), False)
     frag_del = random.choice(subpockets)
     del_frag_id = remove_fragid(fragment_id, frag_del)
     del_bond_id = remove_bond(bond_id, frag_del)
@@ -152,13 +166,15 @@ def fragment_del(fragment_id, bond_id, fragment_library):
     return del_ligand, del_frag_id, del_bond_id
 
 
-def fragment_add(fragment_id, bond_id, fragment_library, subpockets):
+def fragment_add(fragment_id, bond_id, fragment_library, subpockets,
+                 max_attempts=MAX_MODIFICATION_ATTEMPTS):
     current_pockets = [s[:2] for s in fragment_id]
     add_pocket = []
     # get all possible additions
     for frag in fragment_id:
         atom_subpockets = fragment_library[frag[:2]].atom_subpockets[int(frag[3:])]
-        frag_pockets = list(set(atom_subpockets.split(" ")))
+        # sorted: set order changes between Python sessions, which would change random.choice below
+        frag_pockets = sorted(set(atom_subpockets.split(" ")))
         add_pocket += [
             (frag[:2], a, frag[3:])
             for a in frag_pockets
@@ -167,31 +183,45 @@ def fragment_add(fragment_id, bond_id, fragment_library, subpockets):
 
     # select position to add fragments
     # frag_opt: (subpocket of present fragment, new subpocket present fragment could connect to, present fragment id)
-    frag_opt = random.choice(add_pocket)
+    if len(add_pocket) == 0:
+        raise IndexError("Cannot add another fragment")
 
-    # sample fragment to add
-    frag_index = fragment_library[frag_opt[1]].sample().index[0]
-    # check subpocket compatibility
-    frag_pockets = list(
-        set(fragment_library[frag_opt[1]].atom_subpockets[frag_index].split(" "))
-    )
-    if frag_opt[0] not in frag_pockets:
-        return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
+    # Draw again while the sampled fragment does not fit. This used to recurse until it
+    # ran into RecursionError, which made the number of tries depend on how deep the
+    # caller already was, so a notebook and a script got different results.
+    for _ in range(max_attempts):
+        frag_opt = random.choice(add_pocket)
 
-    # add new fragment_id
-    fragment_id.append(frag_opt[1] + "_" + str(frag_index))
-    # get new dummy atoms to connect
-    atom_id = get_dummy_id(
-        fragment_library[frag_opt[0]].iloc[int(frag_opt[2])], frag_opt[1]
-    )
-    atom_id1 = get_dummy_id(fragment_library[frag_opt[1]].iloc[frag_index], frag_opt[0])
-    # add new bond_id
-    bond_id.append(
-        (frag_opt[0] + "_" + str(atom_id), frag_opt[1] + "_" + str(atom_id1))
-    )
-    # create molecule
-    ligand = construct_ligand(fragment_id, bond_id, fragment_library)
-    return ligand, fragment_id, bond_id
+        # sample fragment to add
+        frag_index = fragment_library[frag_opt[1]].sample().index[0]
+        # check subpocket compatibility
+        frag_pockets = list(
+            set(fragment_library[frag_opt[1]].atom_subpockets[frag_index].split(" "))
+        )
+        if frag_opt[0] not in frag_pockets:
+            continue
+
+        # get new dummy atoms to connect
+        frag = fragment_library[frag_opt[0]].loc[int(frag_opt[2])]
+        frag1 = fragment_library[frag_opt[1]].loc[frag_index]
+        atom_id = get_dummy_id(frag, frag_opt[1])
+        atom_id1 = get_dummy_id(frag1, frag_opt[0])
+
+        # check brics compatibility
+        if not brics_compatibility(frag, atom_id, frag1, atom_id1):
+            continue
+
+        # add new fragment_id
+        fragment_id.append(frag_opt[1] + "_" + str(frag_index))
+        # add new bond_id
+        bond_id.append(
+            (frag_opt[0] + "_" + str(atom_id), frag_opt[1] + "_" + str(atom_id1))
+        )
+        # create molecule
+        ligand = construct_ligand(fragment_id, bond_id, fragment_library)
+        return ligand, fragment_id, bond_id
+
+    raise IndexError(f"no fragment to add fitted in {max_attempts} attempts")
 
 
 def get_dummy_id(fragment, subpocket):
@@ -203,48 +233,105 @@ def get_dummy_id(fragment, subpocket):
     return None
 
 
-def fragment_exchange(fragment_id, bond_id, fragment_library):
-    subpockets = get_terminal_fragments(bond_id, fragment_library.keys())
-    exch_pocket = random.choice(subpockets)
-    # save current bond id and pocket (which is to be exchanged)
-    for b in bond_id:
-        if exch_pocket in b[0]:
-            bond_id_1 = b[1]
-            neigh_pocket = b[1][:2]
-        elif exch_pocket in b[1]:
-            bond_id_1 = b[0]
-            neigh_pocket = b[0][:2]
+def get_atom_env(fragment, atom_ind):
+    fragment = Chem.RemoveHs(fragment.ROMol_original)
+    for i, a in enumerate(fragment.GetAtoms()):
+        if i == atom_ind:
+            return a.GetProp("environment")
+    return None
 
-    # remove fragment
-    del_frag_id = remove_fragid(fragment_id, exch_pocket)
-    del_bond_id = remove_bond(bond_id, exch_pocket)
 
-    # add fragment in same space
-    frag_index = fragment_library[exch_pocket].sample().index[0]
-    frag_pockets = list(
-        set(fragment_library[exch_pocket].atom_subpockets[frag_index].split(" "))
-    )
-    if neigh_pocket not in frag_pockets:
-        # select different fragment
-        return fragment_exchange(fragment_id, bond_id, fragment_library)
-    del_frag_id.append(exch_pocket + "_" + str(frag_index))
-    # get dummy atom to connect from new fragment
-    atom_id = get_dummy_id(fragment_library[exch_pocket].iloc[frag_index], neigh_pocket)
-    del_bond_id.append((bond_id_1, exch_pocket + "_" + str(atom_id)))
-    ligand = construct_ligand(del_frag_id, del_bond_id, fragment_library)
-    return ligand, del_frag_id, del_bond_id
+def brics_compatibility(frag1, atom_id1, frag2, atom_id2):
+    atom1_dummy = Chem.RemoveHs(frag1.ROMol_original).GetAtomWithIdx(atom_id1)
+    atom2_dummy = Chem.RemoveHs(frag2.ROMol_original).GetAtomWithIdx(atom_id2)
+    frag1_atom_id = atom1_dummy.GetNeighbors()[0].GetIdx()
+    frag2_atom_id = atom2_dummy.GetNeighbors()[0].GetIdx()
+    atom_env1 = get_atom_env(frag1, frag1_atom_id)
+    atom_env2 = get_atom_env(frag2, frag2_atom_id)
+    return brics_rules.is_brics_bond(atom_env1, atom_env2)
+
+
+def fragment_exchange(fragment_id, bond_id, fragment_library,
+                      max_attempts=MAX_MODIFICATION_ATTEMPTS):
+    subpockets = get_terminal_fragments(bond_id, fragment_library.keys(), True)
+    # always allow AP
+    if "AP" not in subpockets:
+        subpockets.append("AP")
+
+    # Draw another subpocket while the exchange does not fit. This used to recurse, see
+    # the note in fragment_add.
+    for _ in range(max_attempts):
+        exch_pocket = random.choice(subpockets)
+        # save current bond id and pocket (which is to be exchanged)
+        # save as list since we allow scaffold hopping of AP fragment
+        bond_id_1 = []
+        neigh_pocket = []
+        for b in bond_id:
+            if exch_pocket in b[0]:
+                bond_id_1.append(b[1])
+                neigh_pocket.append(b[1][:2])
+            elif exch_pocket in b[1]:
+                bond_id_1.append(b[0])
+                neigh_pocket.append(b[0][:2])
+
+        # remove fragment
+        del_frag_id = remove_fragid(fragment_id, exch_pocket)
+        del_bond_id = remove_bond(bond_id, exch_pocket)
+
+        # select fragment to add in same space. This was an unbounded `while True`, which
+        # never returned when no fragment of this subpocket could fit the neighbours.
+        frag_index = None
+        for _ in range(max_attempts):
+            candidate = fragment_library[exch_pocket].sample().index[0]
+            frag_pockets = set(
+                fragment_library[exch_pocket].atom_subpockets[candidate].split(" ")
+            )
+            # check fragment compatibility
+            if set(neigh_pocket).issubset(frag_pockets):
+                frag_index = candidate
+                break
+        if frag_index is None:
+            continue  # nothing fitted in this subpocket, try another one
+
+        del_frag_id.append(exch_pocket + "_" + str(frag_index))
+        # get dummy atom to connect from new fragment
+        compatible = True
+        for bond, pocket in zip(bond_id_1, neigh_pocket):
+            atom_id = get_dummy_id(fragment_library[exch_pocket].loc[frag_index], pocket)
+            frag_index1 = utils.extract_frag_id(
+                fragment_id, pocket
+            )  # int(bond.split("_")[1])
+            atom_id1 = get_dummy_id(fragment_library[pocket].loc[frag_index1], exch_pocket)
+            # check for brics compatibility
+            if not brics_compatibility(
+                fragment_library[exch_pocket].loc[frag_index],
+                atom_id,
+                fragment_library[pocket].loc[frag_index1],
+                atom_id1,
+            ):
+                # start over instead of keeping an incompatible bond
+                compatible = False
+                break
+            del_bond_id.append((bond, exch_pocket + "_" + str(atom_id)))
+        if not compatible:
+            continue
+
+        ligand = construct_ligand(del_frag_id, del_bond_id, fragment_library)
+        return ligand, del_frag_id, del_bond_id
+
+    raise IndexError(f"no fragment exchange fitted in {max_attempts} attempts")
 
 
 def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
-    # TODO: catch recursion depth error (fragment_add)
+    # no setrecursionlimit here any more: the modifications below count their own
+    # attempts, see MAX_MODIFICATION_ATTEMPTS
     # if only one fragment present, add fragment instead
     if len(fragment_id) == 1:
         try:
-            ligand, frag_id, bonds = fragment_add(
-                fragment_id, bond_id, fragment_library, subpockets
-            )
-            return ligand, frag_id, bonds
-        except IndexError:
+            return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
+        except (IndexError, RecursionError) as e:
+            print("294")
+            print(e)
             return None
     # else: choose randomly between three options: addition, deletion or substitution
     frag_opt = random.choice(range(3))
@@ -254,21 +341,39 @@ def fragment_modification(fragment_id, bond_id, fragment_library, subpockets):
     # fragment addition
     elif frag_opt == 1:
         try:
-            ligand, frag_id, bonds = fragment_add(
-                fragment_id, bond_id, fragment_library, subpockets
-            )
-        except IndexError:
+            return fragment_add(fragment_id, bond_id, fragment_library, subpockets)
+        except (IndexError, RecursionError) as e:
+            # print("307")
+            # print(e)
             # no possibility to add, choose between delete and exchange instead
             new_opt = random.choice(range(2))
             if new_opt == 0:
-                ligand, frag_id, bonds = fragment_del(
-                    fragment_id, bond_id, fragment_library
-                )
+                return fragment_del(fragment_id, bond_id, fragment_library)
             elif new_opt == 1:
-                ligand, frag_id, bonds = fragment_exchange(
-                    fragment_id, bond_id, fragment_library
-                )
-        return ligand, frag_id, bonds
+                try:
+                    return fragment_exchange(fragment_id, bond_id, fragment_library)
+                except (IndexError, RecursionError) as e:
+                    print("317")
+                    print(e)
+                    # can't find fragment to exchange, delete fragment instead
+                    return fragment_del(fragment_id, bond_id, fragment_library)
     # fragment exchange
     elif frag_opt == 2:
-        return fragment_exchange(fragment_id, bond_id, fragment_library)
+        try:
+            return fragment_exchange(fragment_id, bond_id, fragment_library)
+        except (IndexError, RecursionError) as e:
+            print("326")
+            print(e)
+            new_opt = random.choice(range(2))
+            if new_opt == 0:
+                return fragment_del(fragment_id, bond_id, fragment_library)
+            elif new_opt == 1:
+                try:
+                    return fragment_add(
+                        fragment_id, bond_id, fragment_library, subpockets
+                    )
+                except (IndexError, RecursionError) as e:
+                    # print("335")
+                    # print(e)
+                    # can't find fragment to exchange, delete fragment instead
+                    return fragment_del(fragment_id, bond_id, fragment_library)

@@ -1,4 +1,4 @@
-name: kin_AL
+name: active_learning
 channels:
   - conda-forge
 dependencies:
@@ -14,6 +14,8 @@ dependencies:
   - ijson
   - ipywidgets>=7.5
   - jupyterlab
+  - openbabel
+  - oddt
   - pip:
     - useful_rdkit_utils 
     - modAL-python>=0.4.1 
