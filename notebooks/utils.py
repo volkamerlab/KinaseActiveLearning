@@ -568,3 +568,7 @@ def extract_frag_id(frags, pocket):
     for fr in frags:
         if pocket in fr:
             return int(fr[3:])
+
+
+def normalize(data, mean, std):
+    return [(d - mean) / std for d in data if d is not None]
